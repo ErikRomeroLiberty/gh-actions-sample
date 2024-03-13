@@ -1,0 +1,43 @@
+name: Desplegar en Sandbox
+run-name: Despliegue en Sandbox
+on:
+  push:
+    branches: [sandbox]
+    paths:
+      - "force-app/**"
+jobs:
+  desplegar-pr-en-sandbox:
+    runs-on: ubuntu-latest
+    container:
+      image: salesforce/salesforcedx:latest-rc-full
+    steps:
+      - name: Agregar repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{GITHUB.REF}}
+          fetch-depth: 0
+      - name: Versión de NodeJs
+        uses: actions/setup-node@v3
+        with:
+          check-latest: true
+      - name: Actualizar CLI y agregar directorio seguro
+        run: |
+          git config --global --add safe.directory /__w/gh-actions-sample/gh-actions-sample
+          sfdx update
+      - name: Instalar SFDX Git Delta
+        run: |
+          echo y | sfdx plugins:install sfdx-git-delta
+          sfdx plugins
+      - name: Agregar URL
+        shell: bash
+        run: |
+          echo ${{secrets.SANDBOX_AUTH_URL}} > ./URL_INSTANCE.json
+      - name: Autenticación en ambiente
+        run: |
+          sf org login sfdx-url --sfdx-url-file ./URL_INSTANCE.json --alias SFDC_INSTANCE
+      - name: Crear conjunto de cambios a validar
+        run: |
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output "." --generate-delta --source force-app/
+      - name: Despliegue
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --post-destructive-changes destructiveChanges/destructiveChanges.xml --verbose

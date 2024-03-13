@@ -1,0 +1,54 @@
+name: Desplegar en Master
+run-name: Despliegue en Master
+on:
+  push:
+    branches: [master]
+    paths:
+      - "force-app/**"
+jobs:
+  desplegar-pr-en-master:
+    runs-on: ubuntu-latest
+    container:
+      image: salesforce/salesforcedx:latest-rc-full
+    steps:
+      - name: Agregar repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{GITHUB.REF}}
+          fetch-depth: 0
+      - name: Versión de NodeJs
+        uses: actions/setup-node@v3
+        with:
+          check-latest: true
+      - name: Actualizar CLI y agregar directorio seguro
+        run: |
+          git config --global --add safe.directory /__w/gh-actions-sample/gh-actions-sample
+          sfdx update
+      - name: Instalar SFDX Git Delta
+        run: |
+          echo y | sfdx plugins:install sfdx-git-delta
+          sfdx plugins
+      - name: Agregar URL y obtener Tests
+        shell: bash
+        run: |
+          echo ${{secrets.PRODUCTION_AUTH_URL}} > ./URL_INSTANCE.json
+          TESTS=$(cat tests/master.csv)
+          echo "APEX_TESTS=$TESTS" >> $GITHUB_ENV
+      - name: Autenticación en ambiente
+        run: |
+          sf org login sfdx-url --sfdx-url-file ./URL_INSTANCE.json --alias SFDC_INSTANCE
+      - name: Crear conjunto de cambios a validar
+        run: |
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output "." --generate-delta --source force-app/
+      - name: Despliegue funcional (sin clases Apex)
+        if: ${{env.APEX_TESTS == '' || env.APEX_TESTS == 'No' || env.APEX_TESTS == 'NO' || env.APEX_TESTS == 'no'}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --test-level RunSpecifiedTests --tests skip --post-destructive-changes destructiveChanges/destructiveChanges.xml --verbose
+      - name: Despliegue con Tests específicos
+        if: ${{env.APEX_TESTS != '' && env.APEX_TESTS != 'No' && env.APEX_TESTS != 'NO' && env.APEX_TESTS != 'no' && env.APEX_TESTS != 'ALL' && env.APEX_TESTS != 'All' && env.APEX_TESTS != 'all'}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --test-level RunSpecifiedTests --tests ${{env.APEX_TESTS}} --post-destructive-changes destructiveChanges/destructiveChanges.xml --verbose
+      - name: Despliegue con todos los Tests
+        if: ${{env.APEX_TESTS == 'ALL' || env.APEX_TESTS == 'All' || env.APEX_TESTS == 'all'}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --test-level RunLocalTests --post-destructive-changes destructiveChanges/destructiveChanges.xml --verbose

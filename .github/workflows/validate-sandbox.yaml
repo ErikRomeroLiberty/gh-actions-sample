@@ -1,0 +1,61 @@
+name: Validar PR en Sandbox
+run-name: Validar ${{GITHUB.EVENT.PULL_REQUEST.TITLE}} en ${{GITHUB.BASE_REF}}
+on:
+  pull_request:
+    types: [opened,synchronize, edited]
+    branches: [sandbox]
+    paths:
+      - "force-app/**"
+jobs:
+  validar-pr-en-sandbox:
+    runs-on: ubuntu-latest
+    container:
+      image: salesforce/salesforcedx:latest-rc-full
+    steps:
+      - name: Agregar repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{GITHUB.REF}}
+          fetch-depth: 0
+      - name: Versión de NodeJs
+        uses: actions/setup-node@v3
+        with:
+          check-latest: true
+      - name: Obtener Tests del PR
+        env:
+          PAYLOAD: ${{GITHUB.EVENT.PULL_REQUEST.BODY}}
+        run: |
+          echo $PAYLOAD > ./pr_body.txt
+          node ./parsePR.js
+          TESTS=$(cat testsToRun.txt)
+          echo "APEX_TESTS=$TESTS" >> $GITHUB_ENV
+      - name: Actualizar CLI y agregar directorio seguro
+        run: |
+          git config --global --add safe.directory /__w/gh-actions-sample/gh-actions-sample
+          sfdx update
+      - name: Instalar SFDX Git Delta
+        run: |
+          echo y | sfdx plugins:install sfdx-git-delta
+          sfdx plugins
+      - name: Agregar URL
+        shell: bash
+        run: |
+          echo ${{secrets.SANDBOX_AUTH_URL}} > ./URL_INSTANCE.json
+      - name: Autenticación en ambiente
+        run: |
+          sf org login sfdx-url --sfdx-url-file ./URL_INSTANCE.json --alias SFDC_INSTANCE
+      - name: Crear conjunto de cambios a validar
+        run: |
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD^" --output "." --generate-delta --source force-app/
+      - name: Probar despliegue funcional
+        if: ${{env.APEX_TESTS == 'No' || env.APEX_TESTS == 'NO' || env.APEX_TESTS == 'no' || env.APEX_TESTS == ''}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --post-destructive-changes destructiveChanges/destructiveChanges.xml --dry-run --verbose
+      - name: Probar despliegue con Tests específicos
+        if: ${{env.APEX_TESTS != '' && env.APEX_TESTS != 'All' && env.APEX_TESTS != 'all' && env.APEX_TESTS != 'No' && env.APEX_TESTS != 'NO' && env.APEX_TESTS != 'no'}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --post-destructive-changes destructiveChanges/destructiveChanges.xml --test-level RunSpecifiedTests --tests ${{env.APEX_TESTS}} --dry-run --verbose
+      - name: Probar despliegue con todos los Tests
+        if: ${{env.APEX_TESTS == 'ALL' || env.APEX_TESTS == 'All' || env.APEX_TESTS == 'all'}}
+        run: |
+          sf project deploy start --manifest package/package.xml --target-org SFDC_INSTANCE --post-destructive-changes destructiveChanges/destructiveChanges.xml --test-level RunLocalTests --dry-run --verbose
