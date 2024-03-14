@@ -11,7 +11,7 @@ global with sharing class AccountManager {
         RestRequest request = RestContext.request;
         String accId = request.requestURI.substringBetween('Accounts/', '/contacts');
         Account acc = [SELECT Id, Name, (SELECT ID, Name FROM Contacts) FROM Account WHERE Id =: accId];
-		System.debug ('Account=>>' + acc);
+		System.debug ('Account =>>' + acc);
         return acc;
     }
 }
